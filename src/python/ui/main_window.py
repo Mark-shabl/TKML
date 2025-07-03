@@ -7,11 +7,11 @@ from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QT
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from loguru import logger
-from .tabs.profiles_tab import ProfilesTab, get_avatar_pixmap
+from ui.tabs.profiles_tab import ProfilesTab, get_avatar_pixmap
 from ui.tabs.installations_tab import InstallationsTab
+from ui.tabs.settings_tab import SettingsTab
 from core.minecraft_manager import MinecraftManager
 from core.build_manager import BuildManager
-from ui.tabs.settings_tab import SettingsTab
 
 # Цветовые константы для единого стиля
 MC_DARK = "#121212"

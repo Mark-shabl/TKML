@@ -105,6 +105,14 @@ class SettingsTab(QWidget):
         # Вкладка выбора пути
         self.path_tab = QWidget()
         path_layout = QVBoxLayout(self.path_tab)
+        self.nick_label = QLabel("Ник:")
+        path_layout.addWidget(self.nick_label)
+        self.nick_edit = QLineEdit()
+        current_nick = self.config_manager.get_active_profile() or ""
+        self.nick_edit.setText(current_nick)
+        self.nick_edit.setPlaceholderText("Введите ваш ник")
+        self.nick_edit.textChanged.connect(self.on_nick_changed)
+        path_layout.addWidget(self.nick_edit)
         self.path_label = QLabel(f"Папка Minecraft: {self.config_manager.get('minecraft_path')}")
         path_layout.addWidget(self.path_label)
         self.choose_btn = QPushButton("Изменить папку Minecraft")
@@ -277,4 +285,11 @@ class SettingsTab(QWidget):
         if self.log_file and Path(self.log_file).exists():
             with open(self.log_file, "w", encoding="utf-8") as f:
                 f.truncate(0)
-            self.update_log_view() 
+            self.update_log_view()
+
+    def on_nick_changed(self, new_nick):
+        self.config_manager.set_active_profile(new_nick)
+        mw = self.window()
+        profile_widget = getattr(mw, "profile_widget", None)
+        if profile_widget is not None:
+            profile_widget.nick.setText(new_nick or "Гость") 

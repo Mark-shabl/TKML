@@ -14,6 +14,7 @@ from src.python.core.build_manager import BuildManager
 from pathlib import Path
 import shutil
 import requests
+import subprocess
 
 # Цвета из CSS
 MC_DARK_GREEN = "#2d6135"
@@ -731,20 +732,132 @@ class InstallationsTab(QWidget):
             self.progress.setVisible(True)
 
     def update_my_builds(self):
+        from pathlib import Path
+        import os
+        from PySide6.QtGui import QPixmap
+        from PySide6.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QHBoxLayout
+        # Удаляем старый scroll_area, если есть
+        if hasattr(self, 'scroll_area') and self.scroll_area:
+            layout = self.my_builds_tab.layout() or QVBoxLayout(self.my_builds_tab)
+            layout.removeWidget(self.scroll_area)
+            self.scroll_area.deleteLater()
+            self.scroll_area = None
+        # Создаём scroll area
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(f"background: transparent; border: none;")
+        content_widget = QWidget()
+        vbox = QVBoxLayout(content_widget)
+        vbox.setContentsMargins(12, 12, 12, 12)
+        vbox.setSpacing(16)
+        # Получить список сборок из папки versions
+        versions_path = self.build_manager.config_manager.get_versions_path()
+        builds = []
+        for folder in os.listdir(versions_path):
+            build_dir = Path(versions_path) / folder
+            if build_dir.is_dir():
+                builds.append(folder)
+        if not builds:
+            vbox.addWidget(QLabel("У вас пока нет сборок", alignment=Qt.AlignmentFlag.AlignCenter))
+        else:
+            for build in builds:
+                build_dir = Path(versions_path) / build
+                # Картинка
+                img_path = None
+                for ext in ('.png', '.jpg', '.jpeg', '.bmp'):
+                    candidate = build_dir / f"{build}{ext}"
+                    if candidate.exists():
+                        img_path = candidate
+                        break
+                # Карточка
+                card = QFrame()
+                card.setStyleSheet(f"""
+                    QFrame {{
+                        background: {MC_GRAY};
+                        border: 2px solid {MC_BORDER};
+                        border-radius: 12px;
+                        margin: 0px;
+                        padding: 10px 18px;
+                    }}
+                """)
+                card_layout = QHBoxLayout(card)
+                card_layout.setContentsMargins(10, 8, 10, 8)
+                card_layout.setSpacing(18)
+                # Картинка превью
+                img_label = QLabel()
+                img_label.setFixedSize(64, 64)
+                if img_path:
+                    pixmap = QPixmap(str(img_path))
+                    img_label.setPixmap(pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                else:
+                    img_label.setText("Нет\nкартинки")
+                    img_label.setStyleSheet(f"color: {MC_TEXT_MUTED}; font-size: 12px;")
+                card_layout.addWidget(img_label)
+                # Вертикальный layout для названия и кнопок
+                info_vbox = QVBoxLayout()
+                info_vbox.setSpacing(8)
+                # Название
+                name_label = QLabel(f"<b>{build}</b>")
+                name_label.setStyleSheet(f"font-size: 18px; color: {MC_TEXT_LIGHT};")
+                info_vbox.addWidget(name_label)
+                # Горизонтальный layout для кнопок
+                btns_hbox = QHBoxLayout()
+                btns_hbox.setSpacing(12)
+                # Кнопка Играть
+                play_btn = QPushButton("Играть")
+                play_btn.setObjectName("playBtn")
+                play_btn.setStyleSheet(
+                    "QPushButton#playBtn {"
+                    "padding: 8px 18px;"
+                    "border-radius: 8px;"
+                    "background: #3a7d44;"
+                    "color: white;"
+                    "font-weight: bold;"
+                    "border: none;"
+                    "transition: background 0.2s, box-shadow 0.2s;"
+                    "}"
+                    "QPushButton#playBtn:hover {"
+                    "background: #2d6135;"
+                    "box-shadow: 0 0 12px 2px rgba(58,125,68,0.25);"
+                    "}"
+                )
+                # TODO: добавить новую логику запуска Minecraft здесь
+                btns_hbox.addWidget(play_btn)
+                # Кнопка Настройки
+                settings_btn = QPushButton("Настройки")
+                settings_btn.setObjectName("settingsBtn")
+                settings_btn.setStyleSheet(
+                    "QPushButton#settingsBtn {"
+                    "padding: 8px 18px;"
+                    "border-radius: 8px;"
+                    "background: #3a7dcf;"
+                    "color: white;"
+                    "font-weight: bold;"
+                    "border: none;"
+                    "transition: background 0.2s, box-shadow 0.2s;"
+                    "}"
+                    "QPushButton#settingsBtn:hover {"
+                    "background: #2d5ca6;"
+                    "box-shadow: 0 0 12px 2px rgba(58,125,207,0.18);"
+                    "}"
+                )
+                settings_btn.clicked.connect(lambda _, b=build: print(f'Настройки: {b}'))
+                btns_hbox.addWidget(settings_btn)
+                btns_hbox.addStretch()
+                info_vbox.addLayout(btns_hbox)
+                info_vbox.addStretch()
+                card_layout.addLayout(info_vbox)
+                vbox.addWidget(card)
+        vbox.addStretch()
+        self.scroll_area.setWidget(content_widget)
+        # Очищаем и добавляем scroll_area в my_builds_tab
         layout = self.my_builds_tab.layout() or QVBoxLayout(self.my_builds_tab)
-        # Очистить layout
         for i in reversed(range(layout.count())):
             item = layout.itemAt(i)
             widget = item.widget() if item else None
             if widget is not None:
                 widget.setParent(None)
-        builds = self.build_manager.get_builds()
-        if not builds:
-            layout.addWidget(QLabel("У вас пока нет сборок", alignment=Qt.AlignmentFlag.AlignCenter))
-            return
-        for build in builds:
-            widget = InstalledVersionWidget(build)
-            layout.addWidget(widget)
+        layout.addWidget(self.scroll_area)
 
     def append_log(self, text):
         self.log_text.append(text)
