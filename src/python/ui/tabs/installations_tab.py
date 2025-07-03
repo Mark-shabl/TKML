@@ -365,82 +365,57 @@ class InstallationsTab(QWidget):
             QWidget {{
                 background: {MC_DARK};
                 color: {MC_TEXT};
-                font-family: 'Rubik';
+                font-family: 'Rubik', Arial, sans-serif;
             }}
-            QPushButton {{
+            QPushButton.sidebar-tab {{
                 border-radius: 8px;
-                padding: 10px 20px;
-                font-weight: 500;
-            }}
-            QLineEdit, QComboBox {{
+                padding: 14px 18px;
+                font-size: 16px;
+                color: {MC_TEXT_MUTED};
                 background: {MC_GRAY};
                 border: 2px solid {MC_BORDER};
-                border-radius: 8px;
-                padding: 8px 12px;
+                margin-bottom: 8px;
+                text-align: left;
+                font-weight: 500;
+                transition: background 0.2s, color 0.2s;
+            }}
+            QPushButton.sidebar-tab:checked {{
+                background: {MC_BLUE};
                 color: {MC_TEXT_LIGHT};
-                font-size: 16px;
-            }}
-            QLineEdit:focus, QComboBox:focus {{
                 border: 2px solid {MC_BLUE};
+                font-weight: bold;
+                box-shadow: 0 0 8px 2px rgba(58,125,207,0.25);
             }}
-            QLabel {{
-                color: {MC_TEXT};
-            }}
-            QProgressBar {{
-                height: 8px;
-                border-radius: 4px;
-                background: {MC_GRAY};
-                border: 1px solid {MC_BORDER};
-            }}
-            QProgressBar::chunk {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {MC_BLUE}, stop:1 {MC_PURPLE});
-                border-radius: 4px;
+            QPushButton.sidebar-tab:hover {{
+                background: {MC_GREEN};
+                color: {MC_TEXT_LIGHT};
             }}
         """)
 
     def setup_ui(self):
-        main_layout = QVBoxLayout(self)
+        main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(20)
+        main_layout.setSpacing(0)
         
-        # Кастомные вкладки-кнопки
-        tabs_layout = QHBoxLayout()
-        tabs_layout.setSpacing(10)
-        self.tab_btns = []
-        
+        # Sidebar с вкладками
+        sidebar = QVBoxLayout()
+        sidebar.setSpacing(0)
+        sidebar.setContentsMargins(0, 0, 24, 0)
         self.btn_my = QPushButton("Мои сборки")
+        self.btn_my.setCheckable(True)
+        self.btn_my.setProperty("class", "sidebar-tab")
         self.btn_create = QPushButton("Создать сборку")
+        self.btn_create.setCheckable(True)
+        self.btn_create.setProperty("class", "sidebar-tab")
         self.btn_ready = QPushButton("Готовые сборки")
-        
-        for btn in [self.btn_my, self.btn_create, self.btn_ready]:
-            btn.setCheckable(True)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    font-size: 17px;
-                    padding: 10px 32px;
-                    border: 2px solid {MC_BORDER};
-                    border-radius: 8px;
-                    background: {MC_GRAY};
-                    color: {MC_TEXT};
-                    font-weight: bold;
-                }}
-                QPushButton:checked {{
-                    border: 2px solid {MC_BLUE};
-                    background: rgba(58, 125, 207, 0.2);
-                    color: {MC_TEXT_LIGHT};
-                }}
-            """)
-            tabs_layout.addWidget(btn)
-            self.tab_btns.append(btn)
-        
-        tabs_layout.addStretch()
-        main_layout.addLayout(tabs_layout)
-        
-        # Группа кнопок для эксклюзивного выбора
-        self.btn_group = QButtonGroup(self)
-        self.btn_group.setExclusive(True)
-        for btn in self.tab_btns:
-            self.btn_group.addButton(btn)
+        self.btn_ready.setCheckable(True)
+        self.btn_ready.setProperty("class", "sidebar-tab")
+        sidebar.addWidget(self.btn_my)
+        sidebar.addWidget(self.btn_create)
+        sidebar.addWidget(self.btn_ready)
+        sidebar.addStretch()
+        self.sidebar_btns = [self.btn_my, self.btn_create, self.btn_ready]
+        main_layout.addLayout(sidebar)
         
         # Контейнер для контента вкладок
         self.tabs_content = QStackedWidget()
@@ -464,11 +439,10 @@ class InstallationsTab(QWidget):
         self.tabs_content.addWidget(self.ready_tab)
         
         # Логика переключения вкладок
-        self.btn_my.clicked.connect(lambda: self.tabs_content.setCurrentWidget(self.my_builds_tab))
-        self.btn_create.clicked.connect(lambda: self.tabs_content.setCurrentWidget(self.create_tab))
-        self.btn_ready.clicked.connect(lambda: self.tabs_content.setCurrentWidget(self.ready_tab))
-        self.btn_my.setChecked(True)
-        self.tabs_content.setCurrentWidget(self.my_builds_tab)
+        self.btn_my.clicked.connect(lambda: self.set_active_tab(0))
+        self.btn_create.clicked.connect(lambda: self.set_active_tab(1))
+        self.btn_ready.clicked.connect(lambda: self.set_active_tab(2))
+        self.set_active_tab(0)
         
         # Обработка смены лоадера
         loader_updater = LoaderUpdater()
@@ -761,3 +735,8 @@ class InstallationsTab(QWidget):
         thread.start()
         self.progress.setValue(0)
         self.progress.setVisible(True)
+
+    def set_active_tab(self, idx):
+        for i, btn in enumerate(self.sidebar_btns):
+            btn.setChecked(i == idx)
+        self.tabs_content.setCurrentIndex(idx)

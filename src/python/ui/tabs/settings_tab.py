@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QTabWidget, QTextEdit, QHBoxLayout, QApplication, QLineEdit, QComboBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QTabWidget, QTextEdit, QHBoxLayout, QApplication, QLineEdit, QComboBox, QStackedWidget
 from PySide6.QtCore import Qt, QTimer
 from pathlib import Path
 import shutil
@@ -29,29 +29,34 @@ class SettingsTab(QWidget):
         super().__init__(parent)
         self.config_manager = config_manager
         self.build_manager = build_manager
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(20)
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(0)
         self.setStyleSheet(f'''
             QWidget {{
                 background: {MC_DARK};
                 color: {MC_TEXT};
                 font-family: 'Rubik', Arial, sans-serif;
             }}
-            QPushButton {{
+            QPushButton.tab-btn {{
                 border-radius: 8px;
-                padding: 10px 20px;
-                font-weight: 500;
+                padding: 12px 24px;
+                font-weight: bold;
+                background: {MC_GRAY};
+                color: {MC_TEXT};
+                border: 2px solid {MC_BORDER};
+                margin-bottom: 8px;
+                font-size: 16px;
+                text-align: left;
+            }}
+            QPushButton.tab-btn:checked {{
+                border: 2px solid {MC_BLUE};
+                background: rgba(58, 125, 207, 0.2);
+                color: {MC_TEXT_LIGHT};
+            }}
+            QPushButton.tab-btn:hover {{
                 background: {MC_GREEN};
                 color: {MC_TEXT_LIGHT};
-                border: none;
-            }}
-            QPushButton:hover {{
-                background: {MC_LIGHT_GREEN};
-            }}
-            QPushButton:disabled {{
-                background: #444;
-                color: #aaa;
             }}
             QLineEdit, QComboBox {{
                 background: {MC_GRAY};
@@ -76,8 +81,27 @@ class SettingsTab(QWidget):
                 padding: 10px;
             }}
         ''')
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        # Sidebar с вкладками
+        sidebar = QVBoxLayout()
+        sidebar.setSpacing(0)
+        sidebar.setContentsMargins(0, 0, 24, 0)
+        self.tab_btns = []
+        self.btn_path = QPushButton("Путь к Minecraft")
+        self.btn_path.setCheckable(True)
+        self.btn_path.setObjectName("tab_path")
+        self.btn_path.setProperty("class", "tab-btn")
+        self.btn_logs = QPushButton("Логи приложения")
+        self.btn_logs.setCheckable(True)
+        self.btn_logs.setObjectName("tab_logs")
+        self.btn_logs.setProperty("class", "tab-btn")
+        sidebar.addWidget(self.btn_path)
+        sidebar.addWidget(self.btn_logs)
+        sidebar.addStretch()
+        self.tab_btns = [self.btn_path, self.btn_logs]
+        main_layout.addLayout(sidebar)
+        # Контейнер для контента вкладок
+        self.tabs_content = QStackedWidget()
+        main_layout.addWidget(self.tabs_content)
         # Вкладка выбора пути
         self.path_tab = QWidget()
         path_layout = QVBoxLayout(self.path_tab)
@@ -87,7 +111,7 @@ class SettingsTab(QWidget):
         self.choose_btn.clicked.connect(self.choose_path)
         path_layout.addWidget(self.choose_btn)
         path_layout.addStretch()
-        self.tabs.addTab(self.path_tab, "Путь к Minecraft")
+        self.tabs_content.addWidget(self.path_tab)
         # Вкладка логов
         self.logs_tab = QWidget()
         logs_layout = QVBoxLayout(self.logs_tab)
@@ -125,10 +149,21 @@ class SettingsTab(QWidget):
         btns_layout.addWidget(self.clear_btn)
         btns_layout.addStretch()
         logs_layout.addLayout(btns_layout)
-        self.tabs.addTab(self.logs_tab, "Логи приложения")
-        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.tabs_content.addWidget(self.logs_tab)
+        # Логика переключения вкладок
+        self.btn_path.clicked.connect(lambda: self.set_active_tab(0))
+        self.btn_logs.clicked.connect(lambda: self.set_active_tab(1))
+        self.set_active_tab(0)
         self.log_file = self._get_latest_log_file()
         self._setup_auto_update()
+
+    def set_active_tab(self, idx):
+        for i, btn in enumerate(self.tab_btns):
+            btn.setChecked(i == idx)
+        self.tabs_content.setCurrentIndex(idx)
+        # При переходе на вкладку логов — скроллим вниз
+        if idx == 1:
+            self.update_log_view(force_scroll_to_bottom=True)
 
     def choose_path(self):
         current_path = str(self.config_manager.get('minecraft_path'))
@@ -156,10 +191,6 @@ class SettingsTab(QWidget):
         self.config_manager.set("minecraft_path", str(new_path))
         self.path_label.setText(f"Папка Minecraft: {new_path}")
         QMessageBox.information(self, "Готово", "Путь к папке Minecraft изменён. Перезапустите приложение для применения изменений.")
-
-    def _on_tab_changed(self, idx):
-        if self.tabs.tabText(idx) == "Логи приложения":
-            self.update_log_view(force_scroll_to_bottom=True)
 
     def _get_latest_log_file(self):
         # Получаем путь к папке логов из config_manager или используем стандартный путь

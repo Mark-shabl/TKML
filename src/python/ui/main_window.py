@@ -13,6 +13,16 @@ from core.minecraft_manager import MinecraftManager
 from core.build_manager import BuildManager
 from ui.tabs.settings_tab import SettingsTab
 
+# Цветовые константы для единого стиля
+MC_DARK = "#121212"
+MC_GRAY = "#1e1e1e"
+MC_TEXT = "#e0e0e0"
+MC_TEXT_LIGHT = "#ffffff"
+MC_TEXT_MUTED = "#b0b0b0"
+MC_BORDER = "#333"
+MC_BLUE = "#3a7dcf"
+MC_GREEN = "#3a7d44"
+
 
 class ProfileWidget(QFrame):
     def __init__(self, config_manager, on_click=None, parent=None):
@@ -138,28 +148,66 @@ class MainWindow(QMainWindow):
         sidebar = QVBoxLayout()
         sidebar.setAlignment(Qt.AlignmentFlag.AlignTop)
         sidebar_widget = QWidget()
-        sidebar_widget.setStyleSheet("background: #232323; min-width: 180px; max-width: 220px;")
+        sidebar_widget.setStyleSheet(f"""
+            background: #232323;
+            min-width: 180px;
+            max-width: 220px;
+        """)
         sidebar_widget.setLayout(sidebar)
         # Профиль
         self.profile_widget = ProfileWidget(self.config_manager, on_click=self.goto_profiles)
         sidebar.addWidget(self.profile_widget)
         sidebar.addSpacing(16)
-        # Кнопка Главная
+        # Стили для кнопок боковой панели
+        sidebar_btn_style = f'''
+            QPushButton[sidebar="true"] {{
+                border-radius: 8px;
+                padding: 14px 18px;
+                font-size: 16px;
+                color: {MC_TEXT_MUTED};
+                background: {MC_GRAY};
+                border: 2px solid {MC_BORDER};
+                margin-bottom: 8px;
+                text-align: left;
+                font-weight: 500;
+                transition: background 0.2s, color 0.2s;
+            }}
+            QPushButton[sidebar="true"]:checked {{
+                background: {MC_BLUE};
+                color: {MC_TEXT_LIGHT};
+                border: 2px solid {MC_BLUE};
+                font-weight: bold;
+                box-shadow: 0 0 8px 2px rgba(58,125,207,0.25);
+            }}
+            QPushButton[sidebar="true"]:hover {{
+                background: {MC_GREEN};
+                color: {MC_TEXT_LIGHT};
+            }}
+        '''
+        self.setStyleSheet(self.styleSheet() + sidebar_btn_style)
+        # Кнопки боковой панели
         self.home_btn = QPushButton("Главная")
-        self.home_btn.setStyleSheet("padding: 12px; font-size: 15px; border-radius: 8px; color: white; background: #393939;")
+        self.home_btn.setCheckable(True)
+        self.home_btn.setProperty("sidebar", True)
         sidebar.addWidget(self.home_btn)
-        # Кнопка Установки
         self.install_btn = QPushButton("Установки")
-        self.install_btn.setStyleSheet("padding: 12px; font-size: 15px; border-radius: 8px; color: white; background: #393939;")
+        self.install_btn.setCheckable(True)
+        self.install_btn.setProperty("sidebar", True)
         sidebar.addWidget(self.install_btn)
         sidebar.addStretch()
-        # Кнопки внизу
         self.news_btn = QPushButton("Что нового")
-        self.news_btn.setStyleSheet("padding: 10px; font-size: 14px; border-radius: 8px; color: white; background: #393939;")
+        self.news_btn.setCheckable(True)
+        self.news_btn.setProperty("sidebar", True)
         self.settings_btn = QPushButton("Настройки")
-        self.settings_btn.setStyleSheet("padding: 10px; font-size: 14px; border-radius: 8px; color: white; background: #393939;")
+        self.settings_btn.setCheckable(True)
+        self.settings_btn.setProperty("sidebar", True)
         sidebar.addWidget(self.news_btn)
         sidebar.addWidget(self.settings_btn)
+        # Группа для эксклюзивного выбора
+        self.sidebar_btns = [self.home_btn, self.install_btn, self.news_btn, self.settings_btn]
+        def set_active_sidebar(idx):
+            for i, btn in enumerate(self.sidebar_btns):
+                btn.setChecked(i == idx)
         # Основная часть
         content_layout = QVBoxLayout()
         header_layout = QHBoxLayout()
@@ -172,7 +220,6 @@ class MainWindow(QMainWindow):
         # QStackedWidget для главной и установок
         self.stack = QStackedWidget()
         self.page_home = QWidget()  # Пустая главная
-        # Создаём менеджер версий Minecraft
         minecraft_manager = MinecraftManager(self.config_manager)
         build_manager = BuildManager(self.config_manager, minecraft_manager)
         self.installations_tab = InstallationsTab(build_manager, minecraft_manager)
@@ -181,13 +228,14 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.installations_tab)
         self.stack.addWidget(self.settings_tab)
         content_layout.addWidget(self.stack)
-        # Итоговая сборка
         main_layout.addWidget(sidebar_widget)
         main_layout.addLayout(content_layout)
-        # Сигналы для переключения страниц
-        self.home_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_home))
-        self.install_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.installations_tab))
-        self.settings_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.settings_tab))
+        # Сигналы для переключения страниц и выделения активной кнопки
+        self.home_btn.clicked.connect(lambda: [self.stack.setCurrentWidget(self.page_home), set_active_sidebar(0)])
+        self.install_btn.clicked.connect(lambda: [self.stack.setCurrentWidget(self.installations_tab), set_active_sidebar(1)])
+        self.news_btn.clicked.connect(lambda: set_active_sidebar(2))
+        self.settings_btn.clicked.connect(lambda: [self.stack.setCurrentWidget(self.settings_tab), set_active_sidebar(3)])
+        set_active_sidebar(0)
 
     def update_play_button(self):
         """Включает или выключает кнопку 'ИГРАТЬ' в зависимости от наличия профиля"""
