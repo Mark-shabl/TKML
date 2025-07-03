@@ -58,7 +58,10 @@ class BuildManager:
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
     
-    def create_build(self, build_config: Dict[str, Any], progress_callback: Optional[Callable] = None) -> bool:
+    def create_build(self, build_config: Dict[str, Any], progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
+        print('create_build called, log_callback:', log_callback)
+        if log_callback:
+            log_callback(f"[BuildManager] Начато создание сборки: {build_config}")
         logger.info(f"Вызван create_build с конфигом: {build_config}")
         logger.info(f"[BuildManager] Начато создание сборки: {build_config}")
         try:
@@ -66,68 +69,84 @@ class BuildManager:
             minecraft_version = build_config.get("minecraft_version")
             loader = build_config.get("loader", "Vanilla")
             loader_version = build_config.get("loader_version")
+            if log_callback:
+                log_callback(f"Параметры: name={build_name}, version={minecraft_version}, loader={loader}, loader_version={loader_version}")
             logger.debug(f"[BuildManager] Параметры: name={build_name}, version={minecraft_version}, loader={loader}, loader_version={loader_version}")
-            
-            logger.info(f"Начинаем создание сборки: {build_name}")
-            
+            if log_callback:
+                log_callback(f"Создаём директорию для сборки: {build_name}")
             if progress_callback:
                 progress_callback(0, "Подготовка к созданию сборки...")
-            
             # Создаем директорию для сборки
             instance_dir = self.instances_path / self._sanitize_name(build_name)
             instance_dir.mkdir(parents=True, exist_ok=True)
+            if log_callback:
+                log_callback(f"Создана папка сборки: {instance_dir}")
             if progress_callback:
                 progress_callback(5, "Создание папки сборки...")
-            
             # Создаем .minecraft папку внутри сборки
             minecraft_instance_dir = instance_dir / ".minecraft"
             minecraft_instance_dir.mkdir(exist_ok=True)
+            if log_callback:
+                log_callback(f"Создана папка .minecraft: {minecraft_instance_dir}")
             if progress_callback:
                 progress_callback(8, "Создание папки .minecraft...")
-            
+            if log_callback:
+                log_callback(f"Загрузка Minecraft версии: {minecraft_version}")
             if progress_callback:
                 progress_callback(10, "Загрузка Minecraft...")
-            
             # Загружаем базовую версию Minecraft
-            if not self._download_minecraft_version(str(minecraft_version), progress_callback):
+            if not self._download_minecraft_version(str(minecraft_version), progress_callback, log_callback):
+                if log_callback:
+                    log_callback(f"Ошибка загрузки Minecraft версии: {minecraft_version}")
                 return False
-            
+            if log_callback:
+                log_callback(f"Minecraft {minecraft_version} загружен.")
             if progress_callback:
                 progress_callback(30, "Minecraft загружен. Подготовка к установке лоадера...")
-            
+            if log_callback:
+                log_callback(f"Установка лоадера: {loader}")
             if progress_callback:
                 progress_callback(40, f"Установка {loader}...")
-            
             # Устанавливаем лоадер
             version_id = str(minecraft_version)
             if loader != "Vanilla":
-                if not self._install_loader(str(minecraft_version), loader, str(loader_version) if loader_version else "", progress_callback):
+                if not self._install_loader(str(minecraft_version), loader, str(loader_version) if loader_version else "", progress_callback, log_callback):
+                    if log_callback:
+                        log_callback(f"Ошибка установки лоадера {loader}")
                     return False
                 version_id = f"{loader.lower()}-{loader_version}-{minecraft_version}"
+                if log_callback:
+                    log_callback(f"Лоадер {loader} установлен.")
                 if progress_callback:
                     progress_callback(70, f"Лоадер {loader} установлен...")
-            
+            if log_callback:
+                log_callback(f"Создание профиля запуска...")
             if progress_callback:
                 progress_callback(80, "Создание профиля запуска...")
-            
             # Создаем профиль запуска
             self._create_launch_profile(build_config, instance_dir, version_id)
+            if log_callback:
+                log_callback(f"Профиль запуска создан.")
             if progress_callback:
                 progress_callback(85, "Профиль запуска создан...")
-            
+            if log_callback:
+                log_callback(f"Создание конфигурации сборки...")
             # Создаем конфигурацию сборки
             self._create_instance_config(build_config, instance_dir)
+            if log_callback:
+                log_callback(f"Конфигурация сборки создана.")
             if progress_callback:
                 progress_callback(95, "Конфигурация сборки создана...")
-            
+            if log_callback:
+                log_callback(f"Сборка создана успешно!")
             if progress_callback:
                 progress_callback(100, "Сборка создана успешно!")
-            
             logger.success(f"[BuildManager] Сборка '{build_name}' успешно создана")
             return True
-            
         except Exception as e:
             logger.exception(f"[BuildManager] Ошибка создания сборки: {e}")
+            if log_callback:
+                log_callback(f"Ошибка создания сборки: {e}")
             if progress_callback:
                 progress_callback(-1, f"Ошибка: {str(e)}")
             return False
@@ -142,22 +161,32 @@ class BuildManager:
         sanitized = re.sub(r'_+', '_', sanitized)
         return sanitized
     
-    def _download_minecraft_version(self, version: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _download_minecraft_version(self, version: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
+        if log_callback:
+            log_callback(f"Начало загрузки Minecraft версии: {version}")
         logger.info(f"Попытка скачать Minecraft версию: {version}")
         logger.info(f"[BuildManager] Начало загрузки версии Minecraft: {version}")
         try:
             version_dir = self.versions_path / version
             if version_dir.exists():
+                if log_callback:
+                    log_callback(f"Версия {version} уже существует: {version_dir}")
                 logger.info(f"Версия {version} уже существует")
                 return True
             version_info = self._get_version_info(version)
             if not version_info:
+                if log_callback:
+                    log_callback(f"Не удалось получить информацию о версии: {version}")
                 return False
             client_url = version_info.get("downloads", {}).get("client", {}).get("url")
             if not client_url:
+                if log_callback:
+                    log_callback(f"URL клиента не найден для версии {version}")
                 logger.error(f"URL клиента не найден для версии {version}")
                 return False
             client_path = version_dir / f"{version}.jar"
+            if log_callback:
+                log_callback(f"Скачивание Minecraft client: {client_url} → {client_path}")
             logger.info({
                 "event": "download_mc_attempt",
                 "filename": f"{version}.jar",
@@ -172,6 +201,8 @@ class BuildManager:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+                if log_callback:
+                    log_callback(f"Minecraft client успешно загружен: {client_path}")
                 logger.info({
                     "event": "download_mc",
                     "filename": f"{version}.jar",
@@ -180,6 +211,8 @@ class BuildManager:
                     "msg": "Minecraft client успешно загружен"
                 })
             except Exception as e:
+                if log_callback:
+                    log_callback(f"Ошибка загрузки Minecraft client: {e}")
                 logger.error({
                     "event": "download_mc_error",
                     "filename": f"{version}.jar",
@@ -188,11 +221,12 @@ class BuildManager:
                     "msg": f"Ошибка загрузки Minecraft client: {e}"
                 })
                 return False
-            # Логирование библиотек и assets уже есть
             logger.success(f"[BuildManager] Версия Minecraft {version} успешно загружена")
             return True
         except Exception as e:
             logger.exception(f"[BuildManager] Ошибка загрузки версии Minecraft {version}")
+            if log_callback:
+                log_callback(f"Ошибка загрузки версии Minecraft {version}: {e}")
             return False
     
     def _get_version_info(self, version: str) -> Optional[Dict[str, Any]]:
@@ -344,19 +378,19 @@ class BuildManager:
             logger.exception(f"[BuildManager] Ошибка загрузки ресурсов для версии {version_info.get('id')}")
             return False
     
-    def _install_loader(self, minecraft_version: str, loader: str, loader_version: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _install_loader(self, minecraft_version: str, loader: str, loader_version: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
         logger.info(f"Начинаю установку лоадера: {loader} {loader_version} для {minecraft_version}")
         try:
             if loader == "Fabric":
-                return self._install_fabric(minecraft_version, loader_version, progress_callback)
+                return self._install_fabric(minecraft_version, loader_version, progress_callback, log_callback)
             elif loader == "Forge":
-                return self._install_forge(minecraft_version, loader_version, progress_callback)
+                return self._install_forge(minecraft_version, loader_version, progress_callback, log_callback)
             elif loader == "Quilt":
-                return self._install_quilt(minecraft_version, loader_version, progress_callback)
+                return self._install_quilt(minecraft_version, loader_version, progress_callback, log_callback)
             elif loader == "NeoForge":
-                return self._install_neoforge(minecraft_version, loader_version, progress_callback)
+                return self._install_neoforge(minecraft_version, loader_version, progress_callback, log_callback)
             elif loader in ["Paper", "Purpur"]:
-                return self._install_server_jar(minecraft_version, loader, loader_version, progress_callback)
+                return self._install_server_jar(minecraft_version, loader, loader_version, progress_callback, log_callback)
             else:
                 logger.warning(f"Лоадер {loader} не поддерживается")
                 return True
@@ -365,9 +399,11 @@ class BuildManager:
             logger.error(f"Ошибка установки лоадера {loader}: {e}")
             return False
     
-    def _install_fabric(self, minecraft_version: str, loader_version: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _install_fabric(self, minecraft_version: str, loader_version: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
         logger.info(f"Установка Fabric: {minecraft_version} {loader_version}")
         try:
+            if log_callback:
+                log_callback(f"Установка Fabric: {minecraft_version} {loader_version}")
             if progress_callback:
                 progress_callback(45, "Установка Fabric...")
             
@@ -399,9 +435,11 @@ class BuildManager:
             logger.error(f"Ошибка установки Fabric: {e}")
             return False
     
-    def _install_forge(self, minecraft_version: str, forge_version: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _install_forge(self, minecraft_version: str, forge_version: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
         logger.info(f"Установка Forge: {minecraft_version} {forge_version}")
         try:
+            if log_callback:
+                log_callback(f"Установка Forge: {minecraft_version} {forge_version}")
             if progress_callback:
                 progress_callback(45, "Установка Forge...")
             
@@ -423,9 +461,11 @@ class BuildManager:
             logger.error(f"Ошибка установки Forge: {e}")
             return False
     
-    def _install_quilt(self, minecraft_version: str, loader_version: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _install_quilt(self, minecraft_version: str, loader_version: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
         logger.info(f"Установка Quilt: {minecraft_version} {loader_version}")
         try:
+            if log_callback:
+                log_callback(f"Установка Quilt: {minecraft_version} {loader_version}")
             if progress_callback:
                 progress_callback(45, "Установка Quilt...")
             
@@ -457,9 +497,11 @@ class BuildManager:
             logger.error(f"Ошибка установки Quilt: {e}")
             return False
     
-    def _install_neoforge(self, minecraft_version: str, neoforge_version: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _install_neoforge(self, minecraft_version: str, neoforge_version: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
         logger.info(f"Установка NeoForge: {minecraft_version} {neoforge_version}")
         try:
+            if log_callback:
+                log_callback(f"Установка NeoForge: {minecraft_version} {neoforge_version}")
             if progress_callback:
                 progress_callback(45, "Установка NeoForge...")
             
@@ -480,9 +522,11 @@ class BuildManager:
             logger.error(f"Ошибка установки NeoForge: {e}")
             return False
     
-    def _install_server_jar(self, minecraft_version: str, server_type: str, build_number: str, progress_callback: Optional[Callable] = None) -> bool:
+    def _install_server_jar(self, minecraft_version: str, server_type: str, build_number: str, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> bool:
         logger.info(f"Установка серверного JAR: {server_type} {build_number} для {minecraft_version}")
         try:
+            if log_callback:
+                log_callback(f"Установка серверного JAR: {server_type} {build_number} для {minecraft_version}")
             if progress_callback:
                 progress_callback(45, f"Установка {server_type}...")
             if server_type == "Paper":

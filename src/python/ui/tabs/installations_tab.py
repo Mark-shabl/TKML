@@ -2,15 +2,18 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, 
     QListWidget, QListWidgetItem, QSizePolicy, QDialog, QDialogButtonBox, 
     QMessageBox, QMenu, QTabWidget, QCheckBox, QScrollArea, QFrame, QGridLayout, 
-    QGraphicsDropShadowEffect, QProgressBar, QButtonGroup, QStackedWidget
+    QGraphicsDropShadowEffect, QProgressBar, QButtonGroup, QStackedWidget, QFileDialog, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve, QTimer, QObject, QRectF, Slot, QThread
-from PySide6.QtGui import QIcon, QPainter, QBrush, QColor, QPen, QFont
+from PySide6.QtGui import QIcon, QPainter, QBrush, QColor, QPen, QFont, QPixmap
 import os
 import json
 import urllib.request
 import threading
 from src.python.core.build_manager import BuildManager
+from pathlib import Path
+import shutil
+import requests
 
 # Цвета из CSS
 MC_DARK_GREEN = "#2d6135"
@@ -333,6 +336,7 @@ class BuildWorker(QObject):
     progress = Signal(int, str)
     finished = Signal()
     error = Signal(str)
+    log_msg = Signal(str)
 
     def __init__(self, build_manager, build_config):
         super().__init__()
@@ -340,13 +344,18 @@ class BuildWorker(QObject):
         self.build_config = build_config
 
     def run(self):
+        print('BuildWorker.run called')
         def progress_callback(value, text):
             print(f"PROGRESS: {value} {text}")
             self.progress.emit(value, text)
+        def log_callback(msg):
+            print(f"LOG: {msg}")
+            self.log_msg.emit(msg)
         try:
-            self.build_manager.create_build(self.build_config, progress_callback)
+            self.build_manager.create_build(self.build_config, progress_callback, log_callback)
             self.finished.emit()
         except Exception as e:
+            print(f"EXCEPTION in BuildWorker.run: {e}")
             self.error.emit(str(e))
 
 class InstallationsTab(QWidget):
@@ -572,26 +581,42 @@ class InstallationsTab(QWidget):
             update_build_name()
 
     def setup_create_tab(self):
+        from PySide6.QtWidgets import QFileDialog
+        from PySide6.QtGui import QPixmap
         form_outer = QVBoxLayout(self.create_tab)
         form_outer.setContentsMargins(24, 24, 24, 24)
         form_outer.setSpacing(18)
-        
         top_layout = QHBoxLayout()
         top_layout.setSpacing(20)
-        
-        # Иконка сборки
-        icon = QLabel("Иконка")
-        icon_size = 4 * 48 + 3 * 14  # 4 поля по 48px + 3 отступа по 14px
-        icon.setFixedSize(icon_size, icon_size)
-        icon.setStyleSheet(f"""
+        # Превью и кнопка выбора картинки
+        img_layout = QVBoxLayout()
+        self.image_preview = QLabel()
+        self.image_preview.setFixedSize(120, 120)
+        self.image_preview.setStyleSheet(f"""
             background: {MC_GRAY};
             border: 2.5px solid {MC_BORDER};
-            border-radius: 0px;
-            font-size: 20px;
+            border-radius: 8px;
+            font-size: 16px;
             color: {MC_TEXT_MUTED};
             qproperty-alignment: AlignCenter;
         """)
-        top_layout.addWidget(icon)
+        self.image_preview.setText("Нет картинки")
+        img_layout.addWidget(self.image_preview)
+        self.select_img_btn = QPushButton("Выбрать картинку")
+        self.select_img_btn.setStyleSheet(f"padding: 6px 16px; margin-top: 8px;")
+        img_layout.addWidget(self.select_img_btn)
+        self.selected_image_path = None
+        def choose_image():
+            file, _ = QFileDialog.getOpenFileName(self.create_tab, "Выберите картинку", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+            if file:
+                self.selected_image_path = file
+                pixmap = QPixmap(file)
+                if not pixmap.isNull():
+                    self.image_preview.setPixmap(pixmap.scaled(120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                else:
+                    self.image_preview.setText("Ошибка картинки")
+        self.select_img_btn.clicked.connect(choose_image)
+        top_layout.addLayout(img_layout)
         
         # Поля формы
         fields_layout = QVBoxLayout()
@@ -654,6 +679,19 @@ class InstallationsTab(QWidget):
         top_layout.addLayout(fields_layout)
         form_outer.addLayout(top_layout)
         
+        # Логи процесса
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFixedHeight(120)
+        self.log_text.setStyleSheet(f"""
+            background: {MC_GRAY};
+            border: 2px solid {MC_BORDER};
+            border-radius: 8px;
+            color: {MC_TEXT_LIGHT};
+            font-size: 14px;
+            padding: 8px;
+        """)
+        form_outer.addWidget(self.log_text)
         form_outer.addStretch()
         
         # Кнопка создания и прогресс-бар
@@ -708,32 +746,77 @@ class InstallationsTab(QWidget):
             widget = InstalledVersionWidget(build)
             layout.addWidget(widget)
 
+    def append_log(self, text):
+        self.log_text.append(text)
+        # Пишем в tmkl.log
+        log_dir = Path(self.build_manager.config_manager.get('minecraft_path')) / "logs"
+        log_file = log_dir / "tmkl.log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+
     def create_build(self):
+        from pathlib import Path
+        import shutil
+        import os
+        import requests
+        import json
+        print('create_build (InstallationsTab) called')
         name = self.name_edit.text().strip()
         mc_version = self.version_combo.currentText()
-        loader = self.loader_combo.currentText()
-        loader_version = self.loader_ver_combo.currentText() if self.loader_ver_combo.isVisible() else None
-        build_config = {
-            'name': name,
-            'minecraft_version': mc_version,
-            'loader': loader,
-            'loader_version': loader_version
-        }
-        worker = BuildWorker(self.build_manager, build_config)
-        thread = QThread()
-        worker.moveToThread(thread)
-        worker.progress.connect(self._on_progress_update)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(lambda: self._on_progress_update(0, ""))
-        worker.finished.connect(self.update_my_builds)  # Обновляем список сборок после создания
-        worker.error.connect(lambda msg: self._on_progress_update(-1, msg))
-        thread.started.connect(worker.run)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: self.threads.remove(thread))
-        self.threads.append(thread)
-        thread.start()
-        self.progress.setValue(0)
+        print(f'mc_version: {mc_version}')
+        if not name:
+            self.append_log('Укажите название сборки!')
+            return
+        if not mc_version:
+            self.append_log('Выберите версию Minecraft!')
+            return
+        # Получаем путь к папке версий
+        versions_path = self.build_manager.config_manager.get_versions_path()
+        build_dir = Path(versions_path) / name.replace(' ', '_')
+        try:
+            build_dir.mkdir(parents=True, exist_ok=True)
+            self.append_log(f'Папка сборки создана: {build_dir}')
+            # Копируем картинку, если выбрана
+            if self.selected_image_path:
+                ext = os.path.splitext(self.selected_image_path)[1]
+                img_dst = build_dir / f"{name.replace(' ', '_')}{ext}"
+                shutil.copy2(self.selected_image_path, img_dst)
+                self.append_log(f'Картинка скопирована: {img_dst}')
+            # Скачиваем JSON-файл версии
+            all_versions = self.build_manager.minecraft_manager.get_available_versions()
+            version_info = next((v for v in all_versions if v.get('id') == mc_version), None)
+            print(f'version_info: {version_info}')
+            if not version_info or 'url' not in version_info:
+                self.append_log(f'Не удалось получить ссылку на JSON-файл версии: {mc_version}')
+                print('all_versions:', all_versions)
+                return
+            json_url = version_info['url']
+            json_dst = build_dir / f"{name.replace(' ', '_')}.json"
+            self.append_log(f'Скачивание JSON-файла версии: {json_url} → {json_dst}')
+            resp = requests.get(json_url, timeout=30)
+            resp.raise_for_status()
+            with open(json_dst, 'w', encoding='utf-8') as f:
+                f.write(resp.text)
+            self.append_log(f'JSON-файл успешно загружен: {json_dst}')
+            # Парсим JSON и ищем ссылку на jar
+            version_json = json.loads(resp.text)
+            jar_url = version_json.get('downloads', {}).get('client', {}).get('url')
+            if not jar_url:
+                self.append_log(f'Не найден URL jar-файла в JSON для версии: {mc_version}')
+                return
+            jar_dst = build_dir / f"{name.replace(' ', '_')}.jar"
+            self.append_log(f'Скачивание jar-файла: {jar_url} → {jar_dst}')
+            resp_jar = requests.get(jar_url, stream=True, timeout=30)
+            resp_jar.raise_for_status()
+            with open(jar_dst, 'wb') as f:
+                for chunk in resp_jar.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            self.append_log(f'jar-файл успешно загружен: {jar_dst}')
+        except Exception as e:
+            self.append_log(f'Ошибка: {e}')
+        self.progress.setValue(100)
         self.progress.setVisible(True)
 
     def set_active_tab(self, idx):
