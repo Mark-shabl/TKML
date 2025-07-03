@@ -220,9 +220,12 @@ class MainWindow(QMainWindow):
         # QStackedWidget для главной и установок
         self.stack = QStackedWidget()
         self.page_home = QWidget()  # Пустая главная
+        # Создание InstallationsTab с передачей функции получения ника
+        def get_active_nick():
+            return self.profile_widget.nick.text() if self.profile_widget.nick.text() != "Гость" else "Player"
         minecraft_manager = MinecraftManager(self.config_manager)
         build_manager = BuildManager(self.config_manager, minecraft_manager)
-        self.installations_tab = InstallationsTab(build_manager, minecraft_manager)
+        self.installations_tab = InstallationsTab(build_manager, minecraft_manager, get_nick_func=get_active_nick)
         self.settings_tab = SettingsTab(self.config_manager, build_manager)
         self.stack.addWidget(self.page_home)
         self.stack.addWidget(self.installations_tab)

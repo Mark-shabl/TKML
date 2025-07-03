@@ -15,6 +15,9 @@ from pathlib import Path
 import shutil
 import requests
 import subprocess
+import platform
+import glob
+import uuid
 
 # Цвета из CSS
 MC_DARK_GREEN = "#2d6135"
@@ -362,10 +365,11 @@ class BuildWorker(QObject):
 class InstallationsTab(QWidget):
     progress_update = Signal(int, str)
     
-    def __init__(self, build_manager, minecraft_manager, parent=None):
+    def __init__(self, build_manager, minecraft_manager, get_nick_func=None, parent=None):
         super().__init__(parent)
         self.build_manager = build_manager
         self.minecraft_manager = minecraft_manager
+        self.get_nick_func = get_nick_func or (lambda: "Player")
         self.threads = []  # Для хранения активных QThread
         self.setup_ui()
         self.update_my_builds()
@@ -769,6 +773,28 @@ class InstallationsTab(QWidget):
                     if candidate.exists():
                         img_path = candidate
                         break
+                # Проверка целостности сборки
+                errors = []
+                json_path = build_dir / f"{build}.json"
+                jar_path = build_dir / f"{build}.jar"
+                if not json_path.exists():
+                    errors.append("Нет JSON-файла версии")
+                if not jar_path.exists():
+                    errors.append("Нет jar-файла версии")
+                missing_libs = []
+                if json_path.exists():
+                    import json
+                    with open(json_path, encoding="utf-8") as f:
+                        version_json = json.load(f)
+                    libs_dir = Path(self.build_manager.config_manager.get('minecraft_path')) / "libraries"
+                    for lib in version_json.get('libraries', []):
+                        artifact = lib.get('downloads', {}).get('artifact')
+                        if artifact:
+                            lib_path = libs_dir / artifact['path']
+                            if not lib_path.exists():
+                                missing_libs.append(str(lib_path))
+                    if missing_libs:
+                        errors.append(f"Нет библиотек: {len(missing_libs)} шт.")
                 # Карточка
                 card = QFrame()
                 card.setStyleSheet(f"""
@@ -793,6 +819,11 @@ class InstallationsTab(QWidget):
                     img_label.setText("Нет\nкартинки")
                     img_label.setStyleSheet(f"color: {MC_TEXT_MUTED}; font-size: 12px;")
                 card_layout.addWidget(img_label)
+                # Если есть ошибки — выводим предупреждение
+                if errors:
+                    err_label = QLabel("<br>".join(errors))
+                    err_label.setStyleSheet("color: #e74c3c; font-size: 13px; font-weight: bold;")
+                    card_layout.addWidget(err_label)
                 # Вертикальный layout для названия и кнопок
                 info_vbox = QVBoxLayout()
                 info_vbox.setSpacing(8)
@@ -821,7 +852,167 @@ class InstallationsTab(QWidget):
                     "box-shadow: 0 0 12px 2px rgba(58,125,68,0.25);"
                     "}"
                 )
-                # TODO: добавить новую логику запуска Minecraft здесь
+                def launch_selected_build():
+                    import shutil
+                    build_dir = Path(versions_path) / build
+                    json_path = build_dir / f"{build}.json"
+                    jar_path = build_dir / f"{build}.jar"
+                    # Проверка наличия java
+                    java_path_setting = self.build_manager.config_manager.get('java_path', 'auto')
+                    java_path = None
+                    if java_path_setting and java_path_setting != 'auto':
+                        java_path = shutil.which(java_path_setting)
+                    if not java_path:
+                        # Пробуем найти java в PATH
+                        java_path = shutil.which('java')
+                    if not java_path and platform.system() == 'Windows':
+                        # Пробуем найти javaw.exe/java.exe в Program Files на всех дисках
+                        candidates = []
+                        drives = [f'{chr(d)}:' for d in range(67, 91) if os.path.exists(f'{chr(d)}:')]  # C: ... Z:
+                        for drive in drives:
+                            for pf_base in ['Program Files', 'Program Files (x86)']:
+                                pf = os.path.join(drive + '\\', pf_base)
+                                if os.path.exists(pf):
+                                    candidates += glob.glob(os.path.join(pf, 'Java', '*', 'bin', 'java.exe'))
+                                    candidates += glob.glob(os.path.join(pf, 'Java', '*', 'bin', 'javaw.exe'))
+                        if candidates:
+                            java_path = candidates[0]
+                    if java_path:
+                        # Сохраняем найденный путь для будущих запусков
+                        self.build_manager.config_manager.set('java_path', java_path)
+                    if not java_path:
+                        self.append_log('Java не найдена! Установите Java 17+ и добавьте в PATH или настройте путь в настройках.')
+                        return
+                    # Проверка jar-файла
+                    if not json_path.exists() or not jar_path.exists():
+                        self.append_log(f'Не найден json или jar-файл: {json_path}, {jar_path}')
+                        return
+                    try:
+                        with open(json_path, encoding="utf-8") as f:
+                            version_json = json.load(f)
+                        # 1. Собираем classpath
+                        libraries = []
+                        libs_dir = Path(self.build_manager.config_manager.get('minecraft_path')) / "libraries"
+                        for lib in version_json.get("libraries", []):
+                            artifact = lib.get("downloads", {}).get("artifact")
+                            if artifact:
+                                lib_path = libs_dir / artifact["path"]
+                                if not lib_path.exists():
+                                    self.append_log(f'Библиотека не найдена: {lib_path}')
+                                libraries.append(str(lib_path))
+                        classpath = os.pathsep.join(libraries + [str(jar_path)])
+                        # 2. Получаем mainClass
+                        main_class = version_json.get("mainClass")
+                        if not main_class:
+                            self.append_log('mainClass не найден в json')
+                            return
+                        # 3. Формируем переменные для подстановки (ОФФЛАЙН-РЕЖИМ)
+                        nick = self.get_nick_func() if callable(self.get_nick_func) else "Player"
+                        # Оффлайн UUID (uuid3 по нику)
+                        offline_uuid = str(uuid.uuid3(uuid.NAMESPACE_DNS, str(nick)))
+                        args = {
+                            "auth_player_name": nick,
+                            "version_name": build,
+                            "game_directory": str(build_dir),
+                            "assets_root": str(Path(self.build_manager.config_manager.get('minecraft_path')) / "assets"),
+                            "assets_index_name": version_json.get("assetIndex", {}).get("id", ""),
+                            "auth_uuid": offline_uuid,
+                            "auth_access_token": "0",  # Оффлайн-режим
+                            "clientid": "",
+                            "auth_xuid": "",
+                            "user_type": "legacy",  # Оффлайн-режим
+                            "user_properties": "{}",
+                            "version_type": version_json.get("type", "release"),
+                            "resolution_width": 854,
+                            "resolution_height": 480,
+                            "natives_directory": str(build_dir / "natives"),
+                            "launcher_name": "TKML",
+                            "launcher_version": "1.0",
+                            "classpath": classpath,
+                        }
+                        # Добавляем все ключи из version_json для безопасной подстановки (например, quickPlayPath)
+                        for k, v in version_json.items():
+                            if k not in args:
+                                args[k] = v
+                        # 4. Собираем JVM arguments
+                        memory_mb = self.build_manager.config_manager.get('memory_mb', 0)
+                        jvm_args = []
+                        if memory_mb and str(memory_mb).isdigit() and int(memory_mb) > 0:
+                            jvm_args.append(f'-Xmx{int(memory_mb)}M')
+                        for item in version_json.get("arguments", {}).get("jvm", []):
+                            if isinstance(item, str):
+                                jvm_args.append(item)
+                            elif isinstance(item, dict):
+                                rules = item.get("rules")
+                                allowed = True
+                                if rules:
+                                    allowed = False
+                                    for rule in rules:
+                                        if rule.get("action") == "allow":
+                                            os_rule = rule.get("os", {})
+                                            if not os_rule or os_rule.get("name") == "windows":
+                                                allowed = True
+                                        if rule.get("action") == "disallow":
+                                            os_rule = rule.get("os", {})
+                                            if os_rule.get("name") == "windows":
+                                                allowed = False
+                                if allowed:
+                                    value = item.get("value")
+                                    if isinstance(value, list):
+                                        jvm_args.extend(value)
+                                    else:
+                                        jvm_args.append(value)
+                        # Безопасная подстановка: если переменной нет — пустая строка
+                        def safe_format(s):
+                            try:
+                                return s.replace('${', '{').format_map(DefaultDictEmpty(args))
+                            except Exception as e:
+                                self.append_log(f'Ошибка подстановки аргумента: {e}')
+                                return s
+                        class DefaultDictEmpty(dict):
+                            def __missing__(self, key):
+                                return ''
+                        jvm_args = [safe_format(v) if isinstance(v, str) else v for v in jvm_args]
+                        # 5. Собираем game arguments
+                        game_args = []
+                        for item in version_json.get("arguments", {}).get("game", []):
+                            if isinstance(item, str):
+                                game_args.append(item)
+                            elif isinstance(item, dict):
+                                rules = item.get("rules")
+                                allowed = True
+                                if rules:
+                                    allowed = False
+                                    for rule in rules:
+                                        if rule.get("action") == "allow":
+                                            allowed = True
+                                        if rule.get("action") == "disallow":
+                                            allowed = False
+                                if allowed:
+                                    value = item.get("value")
+                                    if isinstance(value, list):
+                                        game_args.extend(value)
+                                    else:
+                                        game_args.append(value)
+                        # Удаляем --demo и связанные параметры, если они есть
+                        game_args = [arg for arg in game_args if not (isinstance(arg, str) and arg.strip().startswith("--demo"))]
+                        game_args = [safe_format(v) if isinstance(v, str) else v for v in game_args]
+                        # 6. Запуск процесса с выводом stdout/stderr
+                        cmd = [java_path] + jvm_args + [main_class] + game_args
+                        self.append_log(f'Запуск: {' '.join(cmd)}')
+                        proc = subprocess.Popen(cmd, cwd=str(build_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        out, err = proc.communicate()
+                        if out:
+                            self.append_log(out)
+                        if err:
+                            self.append_log(err)
+                        if proc.returncode == 0:
+                            self.append_log('Minecraft успешно запущен (или завершён без ошибок).')
+                        else:
+                            self.append_log(f'Процесс завершился с ошибкой (код {proc.returncode})')
+                    except Exception as e:
+                        self.append_log(f'Ошибка запуска: {e}')
+                play_btn.clicked.connect(launch_selected_build)
                 btns_hbox.addWidget(play_btn)
                 # Кнопка Настройки
                 settings_btn = QPushButton("Настройки")
@@ -861,9 +1052,9 @@ class InstallationsTab(QWidget):
 
     def append_log(self, text):
         self.log_text.append(text)
-        # Пишем в tmkl.log
-        log_dir = Path(self.build_manager.config_manager.get('minecraft_path')) / "logs"
-        log_file = log_dir / "tmkl.log"
+        # Пишем в logs/tmkl.log относительно настроек пользователя
+        log_dir = self.build_manager.config_manager.get_logs_path()
+        log_file = log_dir / 'tmkl.log'
         log_dir.mkdir(parents=True, exist_ok=True)
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(text + "\n")
@@ -927,6 +1118,25 @@ class InstallationsTab(QWidget):
                     if chunk:
                         f.write(chunk)
             self.append_log(f'jar-файл успешно загружен: {jar_dst}')
+            # Скачиваем библиотеки
+            libs_dir = Path(self.build_manager.config_manager.get('minecraft_path')) / "libraries"
+            for lib in version_json.get('libraries', []):
+                artifact = lib.get('downloads', {}).get('artifact')
+                if artifact:
+                    url = artifact.get('url')
+                    path = libs_dir / artifact['path']
+                    if not path.exists():
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        try:
+                            r = requests.get(url, timeout=30)
+                            r.raise_for_status()
+                            with open(path, 'wb') as f:
+                                f.write(r.content)
+                            self.append_log(f'Скачана библиотека: {path}')
+                        except Exception as e:
+                            self.append_log(f'Ошибка скачивания {url}: {e}')
+                    else:
+                        self.append_log(f'Библиотека уже есть: {path}')
         except Exception as e:
             self.append_log(f'Ошибка: {e}')
         self.progress.setValue(100)

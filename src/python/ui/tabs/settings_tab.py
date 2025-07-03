@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QTabWidget, QTextEdit, QHBoxLayout, QApplication, QLineEdit, QComboBox, QStackedWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QTabWidget, QTextEdit, QHBoxLayout, QApplication, QLineEdit, QComboBox, QStackedWidget, QSlider, QSizePolicy, QFrame
 from PySide6.QtCore import Qt, QTimer
 from pathlib import Path
 import shutil
@@ -113,11 +113,77 @@ class SettingsTab(QWidget):
         self.nick_edit.setPlaceholderText("Введите ваш ник")
         self.nick_edit.textChanged.connect(self.on_nick_changed)
         path_layout.addWidget(self.nick_edit)
+        # Разделитель между ником и папкой Minecraft
+        nick_divider = QFrame()
+        nick_divider.setFrameShape(QFrame.Shape.HLine)
+        nick_divider.setFrameShadow(QFrame.Shadow.Sunken)
+        nick_divider.setStyleSheet(f"color: {MC_BORDER}; background: {MC_BORDER}; min-height: 2px; max-height: 2px; margin: 10px 0 10px 0; border: none;")
+        path_layout.addWidget(nick_divider)
         self.path_label = QLabel(f"Папка Minecraft: {self.config_manager.get('minecraft_path')}")
         path_layout.addWidget(self.path_label)
         self.choose_btn = QPushButton("Изменить папку Minecraft")
         self.choose_btn.clicked.connect(self.choose_path)
         path_layout.addWidget(self.choose_btn)
+        # --- СЕКЦИЯ: Профиль и путь ---
+        profile_section = QVBoxLayout()
+        profile_section.setSpacing(10)
+        profile_section.setContentsMargins(0, 0, 0, 0)
+        profile_title = QLabel("<b>Профиль и путь к Minecraft</b>")
+        profile_title.setStyleSheet("font-size: 17px; margin-bottom: 6px;")
+        profile_section.addWidget(profile_title)
+        profile_section.addWidget(self.nick_label)
+        profile_section.addWidget(self.nick_edit)
+        # Разделитель между ником и папкой Minecraft
+        nick_divider = QFrame()
+        nick_divider.setFrameShape(QFrame.Shape.HLine)
+        nick_divider.setFrameShadow(QFrame.Shadow.Sunken)
+        nick_divider.setStyleSheet(f"color: {MC_BORDER}; background: {MC_BORDER}; min-height: 2px; max-height: 2px; margin: 10px 0 10px 0; border: none;")
+        profile_section.addWidget(nick_divider)
+        profile_section.addWidget(self.path_label)
+        profile_section.addWidget(self.choose_btn)
+        # --- СЕКЦИЯ: Память ---
+        mem_section = QVBoxLayout()
+        mem_section.setSpacing(10)
+        mem_section.setContentsMargins(0, 16, 0, 0)
+        mem_title = QLabel("<b>Параметры запуска</b>")
+        mem_title.setStyleSheet("font-size: 17px; margin-bottom: 6px;")
+        mem_section.addWidget(mem_title)
+        mem_label = QLabel("Оперативная память для Minecraft:")
+        mem_section.addWidget(mem_label)
+        mem_slider_layout = QHBoxLayout()
+        self.memory_slider = QSlider(Qt.Orientation.Horizontal)
+        self.memory_slider.setMinimum(0)
+        self.memory_slider.setMaximum(7)
+        self.memory_slider.setTickInterval(1)
+        self.memory_slider.setSingleStep(1)
+        self.memory_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.memory_slider.setStyleSheet(f"margin-left:8px; margin-right:8px;")
+        self.memory_slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.memory_value_label = QLabel()
+        self.memory_value_label.setFixedWidth(60)
+        mem_gb_values = [0, 1, 2, 4, 6, 8, 12, 16]
+        mem_gb_labels = ["Авто", "1 ГБ", "2 ГБ", "4 ГБ", "6 ГБ", "8 ГБ", "12 ГБ", "16 ГБ"]
+        saved_mb = int(self.config_manager.get("memory_mb", 0) or 0)
+        slider_idx = mem_gb_values.index(saved_mb) if saved_mb in mem_gb_values else 0
+        self.memory_slider.setValue(slider_idx)
+        self.memory_value_label.setText(mem_gb_labels[slider_idx])
+        def on_slider_changed(idx):
+            mb = [0, 1024, 2048, 4096, 6144, 8192, 12288, 16384][idx]
+            self.config_manager.set("memory_mb", mb)
+            self.memory_value_label.setText(mem_gb_labels[idx])
+        self.memory_slider.valueChanged.connect(on_slider_changed)
+        mem_slider_layout.addWidget(self.memory_slider)
+        mem_slider_layout.addWidget(self.memory_value_label)
+        mem_section.addLayout(mem_slider_layout)
+        # --- Добавляем секции на страницу ---
+        path_layout.addLayout(profile_section)
+        # Разделитель между секциями (оставляем только между памятью и профилем)
+        section_divider = QFrame()
+        section_divider.setFrameShape(QFrame.Shape.HLine)
+        section_divider.setFrameShadow(QFrame.Shadow.Sunken)
+        section_divider.setStyleSheet(f"color: {MC_BORDER}; background: {MC_BORDER}; min-height: 2px; max-height: 2px; margin: 18px 0 12px 0; border: none;")
+        path_layout.addWidget(section_divider)
+        path_layout.addLayout(mem_section)
         path_layout.addStretch()
         self.tabs_content.addWidget(self.path_tab)
         # Вкладка логов
